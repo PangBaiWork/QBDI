@@ -197,7 +197,16 @@ public:
    */
   QBDI_EXPORT bool instrumentAllExecutableMaps();
 
+  /*! Enable or disable blacklist mode for instrumentation.
+   *
+   * When enabled, any address not covered by a blacklisted range is treated as
+   * instrumented. In this mode, removeInstrumentedRange() adds to the
+   * blacklist.
+   */
+  QBDI_EXPORT void enableBlacklistMode(bool enable);
+
   /*! Remove an address range from the set of instrumented address ranges.
+   *  If blacklist mode is enabled, the range is added to the blacklist.
    *
    * @param[in] start  Start address of the range (included).
    * @param[in] end    End address of the range (excluded).

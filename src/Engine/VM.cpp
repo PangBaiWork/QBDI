@@ -410,6 +410,12 @@ bool VM::instrumentAllExecutableMaps() {
   return engine->instrumentAllExecutableMaps();
 }
 
+// enableBlacklistMode
+
+void VM::enableBlacklistMode(bool enable) {
+  engine->enableBlacklistMode(enable);
+}
+
 // removeInstrumentedRange
 
 void VM::removeInstrumentedRange(rword start, rword end) {

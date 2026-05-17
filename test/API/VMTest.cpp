@@ -374,6 +374,31 @@ TEST_CASE_METHOD(APITest, "VMTest-VMEvent_ExecTransfer") {
   vm.deleteAllInstrumentations();
 }
 
+TEST_CASE_METHOD(APITest, "VMTest-BlacklistModeRange") {
+  QBDI::simulateCall(state, FAKE_RET_ADDR, {42});
+
+  vm.enableBlacklistMode(true);
+  vm.removeInstrumentedRange(reinterpret_cast<QBDI::rword>(dummyFun1),
+                             reinterpret_cast<QBDI::rword>(dummyFun1) + 1);
+  vm.addInstrumentedRange(reinterpret_cast<QBDI::rword>(dummyFun1),
+                          reinterpret_cast<QBDI::rword>(dummyFun1) + 1);
+
+  bool ran =
+      vm.run(reinterpret_cast<QBDI::rword>(dummyFun1),
+         static_cast<QBDI::rword>(FAKE_RET_ADDR));
+  REQUIRE_FALSE(ran);
+
+  vm.removeAllInstrumentedRanges();
+  QBDI::simulateCall(state, FAKE_RET_ADDR, {42});
+  ran = vm.run(reinterpret_cast<QBDI::rword>(dummyFun1),
+               static_cast<QBDI::rword>(FAKE_RET_ADDR));
+  REQUIRE(ran);
+  QBDI::rword ret = QBDI_GPR_GET(state, QBDI::REG_RETURN);
+  REQUIRE(ret == (QBDI::rword)dummyFun1(42));
+
+  SUCCEED();
+}
+
 struct CheckBasicBlockData {
   bool waitingEnd;
   QBDI::rword BBStart;

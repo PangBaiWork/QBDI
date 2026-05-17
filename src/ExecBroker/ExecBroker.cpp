@@ -28,7 +28,7 @@ namespace QBDI {
 
 ExecBroker::ExecBroker(std::unique_ptr<ExecBlock> _transferBlock,
                        const LLVMCPUs &llvmCPUs, VMInstanceRef vminstance)
-    : transferBlock(std::move(_transferBlock)) {
+    : transferBlock(std::move(_transferBlock)), blacklistMode(false) {
   pageSize = llvm::expectedToOptional(llvm::sys::Process::getPageSize())
                  .value_or(4096);
   initExecBrokerSequences(llvmCPUs);
@@ -38,20 +38,70 @@ void ExecBroker::changeVMInstanceRef(VMInstanceRef vminstance) {
   transferBlock->changeVMInstanceRef(vminstance);
 }
 
+size_t ExecBroker::getPatchRangeSize(rword start) const {
+  if (blacklistMode) {
+    const Range<rword> *curRange = blacklisted.getElementRange(start);
+    if (curRange != nullptr) {
+      return 0;
+    }
+    const auto &ranges = blacklisted.getRanges();
+    auto it = std::lower_bound(
+        ranges.cbegin(), ranges.cend(), start,
+        [](const Range<rword> &range, rword value) {
+          return range.end() <= value;
+        });
+    if (it != ranges.cend()) {
+      return it->start() - start;
+    }
+    return static_cast<size_t>(-1);
+  }
+
+  const Range<rword> *curRange = instrumented.getElementRange(start);
+  if (curRange != nullptr) {
+    return curRange->end() - start;
+  }
+  return static_cast<size_t>(-1);
+}
+
 void ExecBroker::addInstrumentedRange(const Range<rword> &r) {
-  QBDI_DEBUG("Adding instrumented range [0x{:x}, 0x{:x}]", r.start(), r.end());
+  if (blacklistMode) {
+    QBDI_WARN(
+        "addInstrumentedRange is ignored in blacklist mode; use "
+        "removeInstrumentedRange to add a blacklisted range");
+    return;
+  }
+  QBDI_DEBUG("Adding instrumented range [0x{:x}, 0x{:x}]", r.start(),
+             r.end());
   instrumented.add(r);
 }
 
 void ExecBroker::removeInstrumentedRange(const Range<rword> &r) {
-  QBDI_DEBUG("Removing instrumented range [0x{:x}, 0x{:x}]", r.start(),
-             r.end());
-  instrumented.remove(r);
+  if (blacklistMode) {
+    QBDI_DEBUG("Adding blacklisted range [0x{:x}, 0x{:x}]", r.start(),
+               r.end());
+    blacklisted.add(r);
+  } else {
+    QBDI_DEBUG("Removing instrumented range [0x{:x}, 0x{:x}]", r.start(),
+               r.end());
+    instrumented.remove(r);
+  }
 }
 
-void ExecBroker::removeAllInstrumentedRanges() { instrumented.clear(); }
+void ExecBroker::removeAllInstrumentedRanges() {
+  if (blacklistMode) {
+    blacklisted.clear();
+  } else {
+    instrumented.clear();
+  }
+}
 
 bool ExecBroker::addInstrumentedModule(const std::string &name) {
+  if (blacklistMode) {
+    QBDI_WARN(
+        "addInstrumentedModule is ignored in blacklist mode; use "
+        "removeInstrumentedModule to blacklist a module");
+    return false;
+  }
   bool instrumented = false;
   if (name.empty()) {
     return false;
@@ -108,6 +158,12 @@ bool ExecBroker::removeInstrumentedModuleFromAddr(rword addr) {
 }
 
 bool ExecBroker::instrumentAllExecutableMaps() {
+  if (blacklistMode) {
+    QBDI_WARN(
+        "instrumentAllExecutableMaps is ignored in blacklist mode; use "
+        "removeInstrumentedRange to add blacklist ranges");
+    return false;
+  }
   bool instrumented = false;
 
   for (const MemoryMap &m : getCurrentProcessMaps()) {

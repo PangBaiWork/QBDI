@@ -19,6 +19,7 @@
 #define QBDI_EXECBROKER_H
 
 #include <algorithm>
+#include <cstddef>
 #include <memory>
 #include <string>
 #include <vector>
@@ -48,8 +49,10 @@ class ExecBroker {
 
 private:
   RangeSet<rword> instrumented;
+  RangeSet<rword> blacklisted;
   std::unique_ptr<ExecBlock> transferBlock;
   rword pageSize;
+  bool blacklistMode;
 
   using PF = llvm::sys::Memory::ProtectionFlags;
 
@@ -65,11 +68,24 @@ public:
 
   void changeVMInstanceRef(VMInstanceRef vminstance);
 
-  bool isInstrumented(rword addr) const { return instrumented.contains(addr); }
+  bool isInstrumented(rword addr) const {
+    return blacklistMode ? !blacklisted.contains(addr)
+                         : instrumented.contains(addr);
+  }
+
+  size_t getPatchRangeSize(rword start) const;
+
+  void setBlacklistMode(bool enable) { blacklistMode = enable; }
+
+  bool isBlacklistMode() const { return blacklistMode; }
 
   void setInstrumentedRange(const RangeSet<rword> &r) { instrumented = r; }
 
   const RangeSet<rword> &getInstrumentedRange() const { return instrumented; }
+
+  void setBlacklistedRange(const RangeSet<rword> &r) { blacklisted = r; }
+
+  const RangeSet<rword> &getBlacklistedRange() const { return blacklisted; }
 
   void addInstrumentedRange(const Range<rword> &r);
   bool addInstrumentedModule(const std::string &name);

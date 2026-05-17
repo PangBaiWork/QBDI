@@ -38,6 +38,7 @@
 #include "QBDI/Bitmask.h"
 #include "QBDI/Config.h"
 #include "QBDI/Errors.h"
+#include "QBDI/Memory.hpp"
 #include "QBDI/PtrAuth.h"
 #include "QBDI/Range.h"
 #include "QBDI/State.h"
@@ -89,6 +90,8 @@ Engine::Engine(const Engine &other)
   execBroker = blockManager->getExecBroker();
   // copy instrumentation range
   execBroker->setInstrumentedRange(other.execBroker->getInstrumentedRange());
+  execBroker->setBlacklistedRange(other.execBroker->getBlacklistedRange());
+  execBroker->setBlacklistMode(other.execBroker->isBlacklistMode());
 
   // Get Patch rules Assembly for this architecture
   patchRuleAssembly = std::make_unique<PatchRuleAssembly>(options);
@@ -122,6 +125,10 @@ Engine &Engine::operator=(const Engine &other) {
     execBroker = blockManager->getExecBroker();
   }
 
+  execBroker->setInstrumentedRange(other.execBroker->getInstrumentedRange());
+  execBroker->setBlacklistedRange(other.execBroker->getBlacklistedRange());
+  execBroker->setBlacklistMode(other.execBroker->isBlacklistMode());
+
   this->setOptions(other.options);
 
   // copy the configuration
@@ -133,9 +140,6 @@ Engine &Engine::operator=(const Engine &other) {
   instrRulesCounter = other.instrRulesCounter;
   vmCallbacksCounter = other.vmCallbacksCounter;
   eventMask = other.eventMask;
-
-  // copy instrumentation range
-  execBroker->setInstrumentedRange(other.execBroker->getInstrumentedRange());
 
   // copy state
   setGPRState(other.getGPRState());
@@ -154,12 +158,17 @@ void Engine::setOptions(Options options) {
     // need to recreate all ExecBlock
     if (patchRuleAssembly->changeOptions(options)) {
       const RangeSet<rword> instrumentationRange =
-          execBroker->getInstrumentedRange();
+        execBroker->getInstrumentedRange();
+      const RangeSet<rword> blacklistedRange =
+        execBroker->getBlacklistedRange();
+      const bool blacklistMode = execBroker->isBlacklistMode();
 
       blockManager = std::make_unique<ExecBlockManager>(*llvmCPUs, vminstance);
       execBroker = blockManager->getExecBroker();
 
       execBroker->setInstrumentedRange(instrumentationRange);
+      execBroker->setBlacklistedRange(blacklistedRange);
+      execBroker->setBlacklistMode(blacklistMode);
     }
     this->options = options;
   }
@@ -232,6 +241,10 @@ bool Engine::instrumentAllExecutableMaps() {
   return execBroker->instrumentAllExecutableMaps();
 }
 
+void Engine::enableBlacklistMode(bool enable) {
+  execBroker->setBlacklistMode(enable);
+}
+
 void Engine::removeInstrumentedRange(rword start, rword end) {
   execBroker->removeInstrumentedRange(Range<rword>(start, end, real_addr_t()));
 }
@@ -255,14 +268,9 @@ std::vector<Patch> Engine::patch(rword start) {
   std::vector<Patch> basicBlock;
   const LLVMCPU &llvmcpu = llvmCPUs->getCPU(curCPUMode);
 
-  // if the first address is within the execution range,
-  // stop the basic if the dissassembler went out of the range
-  size_t sizeCode = (size_t)-1;
-  const Range<rword> *curRange =
-      execBroker->getInstrumentedRange().getElementRange(start);
-  if (curRange != nullptr) {
-    sizeCode = curRange->end() - start;
-  }
+  // If the first address is within the execution range, stop the basic block
+  // if the disassembler went out of the range.
+  size_t sizeCode = execBroker->getPatchRangeSize(start);
 
   const llvm::ArrayRef<uint8_t> code((uint8_t *)start, sizeCode);
   rword address = start;
